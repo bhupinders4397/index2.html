@@ -1,184 +1,340 @@
 <!DOCTYPE html>
-<html lang="en" x-data="app()" x-init="init()">
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Replit Pro </title>
+<meta charset="UTF-8" />
+<title>AI Super App</title>
 
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
 <style>
-body { font-family: sans-serif; }
+:root {
+  --bg:#0b0f19;
+  --panel:#111827;
+  --accent:#3b82f6;
+  --text:#e5e7eb;
+}
+
+body {
+  margin:0;
+  font-family:system-ui;
+  background:var(--bg);
+  color:var(--text);
+  overflow:hidden;
+}
+
+/* SIDEBAR */
+#sidebar {
+  position:fixed;
+  left:0;
+  top:0;
+  width:260px;
+  height:100%;
+  background:var(--panel);
+  padding:10px;
+  transform:translateX(0);
+  transition:0.3s;
+  z-index:10;
+}
+
+.chatItem {
+  padding:10px;
+  margin:5px 0;
+  background:#1f2937;
+  border-radius:10px;
+  cursor:pointer;
+}
+
+/* MAIN */
+#main {
+  margin-left:260px;
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+}
+
+/* CHAT */
+#chat {
+  flex:1;
+  overflow:auto;
+  padding:15px;
+}
+
+.msg {
+  max-width:75%;
+  padding:10px;
+  margin:10px 0;
+  border-radius:12px;
+}
+
+.user { background:#2563eb; margin-left:auto; }
+.bot { background:#1f2937; }
+
+/* INPUT */
+#bar {
+  display:flex;
+  padding:10px;
+  background:#111827;
+}
+
+input {
+  flex:1;
+  padding:10px;
+  background:#1f2937;
+  border:none;
+  color:white;
+}
+
+button {
+  margin-left:5px;
+  padding:10px;
+  background:var(--accent);
+  color:white;
+  border:none;
+}
+
+/* IMAGE GRID */
+#images {
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:10px;
+  padding:10px;
+}
+
+img {
+  width:100%;
+  border-radius:10px;
+}
+
+/* MOBILE */
+@media(max-width:768px){
+  #main { margin-left:0; }
+  #sidebar { transform:translateX(-100%); }
+}
+
+/* swipe handle */
+#handle {
+  position:fixed;
+  left:0;
+  top:0;
+  width:20px;
+  height:100%;
+  z-index:20;
+}
 </style>
 </head>
 
-<body class="bg-black text-white h-screen flex flex-col">
+<body>
 
-<!-- HEADER -->
-<div class="p-3 flex justify-between border-b border-gray-700">
-    <h1 class="font-bold">🤖 Replit Pro</h1>
+<div id="handle"></div>
 
-    <input x-model="apiKey" placeholder="OpenRouter API Key"
-           class="text-black px-2 py-1 rounded w-64">
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <button onclick="newChat()">+ New Chat</button>
+  <button onclick="mode='image'">🖼 Image Mode</button>
+  <button onclick="mode='chat'">💬 Chat Mode</button>
+  <button onclick="startVoice()">🎙 Talk</button>
+  <div id="list"></div>
 </div>
 
-<!-- CHAT -->
-<div class="flex-1 overflow-y-auto p-4 space-y-3"
-     @dragover.prevent
-     @drop="handleDrop($event)">
+<!-- MAIN -->
+<div id="main">
 
-    <template x-for="(m,i) in messages" :key="i">
-        <div class="group relative">
+<div id="chat"></div>
+<div id="images"></div>
 
-            <div class="text-xs opacity-50" x-text="m.role"></div>
-
-            <div class="p-3 bg-gray-800 rounded relative">
-
-                <span x-text="m.content"></span>
-
-                <template x-if="m.image">
-                    <img :src="m.image" class="mt-2 max-w-xs rounded">
-                </template>
-
-                <!-- COPY BUTTON -->
-                <button 
-                    @click="copyText(m.content)"
-                    class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-gray-700 text-xs px-2 py-1 rounded">
-                    📋
-                </button>
-
-            </div>
-        </div>
-    </template>
-
+<div id="bar">
+  <input id="input" placeholder="Type or speak..." />
+  <button onclick="send()">Send</button>
 </div>
 
-<!-- INPUT -->
-<div class="p-3 flex gap-2 items-center">
-
-    <button @click="toggleVoice()">🎤</button>
-
-    <input x-model="input" @keydown.enter="send()"
-           class="flex-1 text-black px-3 py-2 rounded">
-
-    <button @click="send()">➡️</button>
-
-</div>
-
-<!-- FOOTER -->
-<footer class="py-3 border-t border-gray-700 flex justify-center items-center">
-    <p class="text-sm text-gray-400">
-        Powered by <span class="text-white font-semibold">Bhupendra Saini</span>
-    </p>
-</footer>
-
-<!-- TOAST -->
-<div x-show="toast" class="fixed bottom-5 right-5 bg-green-600 px-4 py-2 rounded">
-    <span x-text="toast"></span>
 </div>
 
 <script>
-function app() {
-return {
+const API_KEY = "YOUR_OPENROUTER_KEY";
 
-apiKey: '',
-messages: [],
-input: '',
-toast: '',
-listening: false,
-recognition: null,
+let chats = JSON.parse(localStorage.getItem("chats")||"[]");
+let current=null;
+let mode="chat";
 
-init() {
-    const saved = localStorage.getItem('chat');
-    if (saved) this.messages = JSON.parse(saved);
-},
-
-limit() {
-    if (this.messages.length > 20) {
-        this.messages = this.messages.slice(-20);
-    }
-},
-
-async send() {
-
-    if (!this.input.trim()) return;
-
-    const text = this.input;
-
-    this.messages.push({ role: 'user', content: text });
-    this.limit();
-    this.input = '';
-
-    try {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": "Bearer " + this.apiKey,
-                "Content-Type": "application/json",
-                "HTTP-Referer": window.location.href,
-                "X-Title": "Replit Pro"
-            },
-            body: JSON.stringify({
-                model: "openai/gpt-4o-mini",
-                messages: this.messages.slice(-20).map(m => ({
-                    role: m.role,
-                    content: m.content
-                }))
-            })
-        });
-
-        const data = await res.json();
-
-        const reply = data.choices[0].message.content;
-
-        this.messages.push({ role: 'assistant', content: reply });
-        this.limit();
-
-        this.speak(reply);
-
-    } catch (e) {
-        this.messages.push({ role: 'assistant', content: "Error: " + e.message });
-    }
-
-    this.save();
-},
-
-copyText(text) {
-    navigator.clipboard.writeText(text);
-    this.toast = "Copied!";
-    setTimeout(() => this.toast = '', 1500);
-},
-
-toggleVoice() {
-    if (!('webkitSpeechRecognition' in window)) return;
-
-    if (this.listening) {
-        this.recognition.stop();
-        this.listening = false;
-        return;
-    }
-
-    this.recognition = new webkitSpeechRecognition();
-    this.recognition.onresult = e => {
-        this.input += e.results[0][0].transcript;
-    };
-
-    this.recognition.start();
-    this.listening = true;
-},
-
-speak(text) {
-    const s = new SpeechSynthesisUtterance(text);
-    speechSynthesis.speak(s);
-},
-
-save() {
-    localStorage.setItem('chat', JSON.stringify(this.messages));
+/* INIT */
+function newChat(){
+  current={id:Date.now(),messages:[]};
+  chats.push(current);
+  save();
+  render();
 }
 
+function save(){
+  localStorage.setItem("chats",JSON.stringify(chats));
 }
+
+/* RENDER */
+function render(){
+  const list=document.getElementById("list");
+  list.innerHTML="";
+
+  chats.forEach(c=>{
+    let d=document.createElement("div");
+    d.className="chatItem";
+    d.innerText="Chat "+c.id;
+    d.onclick=()=>{current=c;draw();};
+    list.appendChild(d);
+  });
+
+  draw();
 }
+
+/* DRAW CHAT */
+function draw(){
+  let chat=document.getElementById("chat");
+  chat.innerHTML="";
+
+  if(!current) return;
+
+  current.messages.forEach(m=>{
+    let d=document.createElement("div");
+    d.className="msg "+m.role;
+    d.innerHTML=marked.parse(m.text);
+    chat.appendChild(d);
+  });
+}
+
+/* STREAM CHAT */
+async function chatAI(messages,cb){
+  const res=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+    method:"POST",
+    headers:{
+      "Authorization":"Bearer "+API_KEY,
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify({
+      model:"openai/gpt-4o-mini",
+      messages,
+      stream:true
+    })
+  });
+
+  const reader=res.body.getReader();
+  const decoder=new TextDecoder();
+  let out="";
+
+  while(true){
+    const {value,done}=await reader.read();
+    if(done) break;
+
+    let chunk=decoder.decode(value);
+    for(let l of chunk.split("\n")){
+      if(l.includes("content")){
+        try{
+          let j=JSON.parse(l.replace("data: ",""));
+          let t=j.choices?.[0]?.delta?.content||"";
+          out+=t;
+          cb(out);
+        }catch{}
+      }
+    }
+  }
+}
+
+/* IMAGE GENERATION */
+async function generateImage(prompt){
+  const res=await fetch("https://openrouter.ai/api/v1/images/generations",{
+    method:"POST",
+    headers:{
+      "Authorization":"Bearer "+API_KEY,
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify({
+      model:"openai/dall-e-3",
+      prompt
+    })
+  });
+
+  const data=await res.json();
+  return data.data?.[0]?.url;
+}
+
+/* SEND */
+async function send(){
+  let input=document.getElementById("input");
+  let text=input.value;
+  if(!text) return;
+
+  if(!current) newChat();
+
+  if(mode==="image"){
+    document.getElementById("images").innerHTML="Generating...";
+
+    let url=await generateImage(text);
+
+    let img=document.createElement("img");
+    img.src=url;
+
+    document.getElementById("images").innerHTML="";
+    document.getElementById("images").appendChild(img);
+
+    speak("Image generated");
+    return;
+  }
+
+  current.messages.push({role:"user",text});
+  input.value="";
+  draw();
+
+  let bot={role:"bot",text:""};
+  current.messages.push(bot);
+
+  let msgs=current.messages.map(m=>({
+    role:m.role==="bot"?"assistant":"user",
+    content:m.text
+  }));
+
+  await chatAI(msgs,v=>{
+    bot.text=v;
+    draw();
+  });
+
+  speak(bot.text);
+  save();
+}
+
+/* VOICE INPUT */
+function startVoice(){
+  let r=new (window.SpeechRecognition||window.webkitSpeechRecognition)();
+  r.lang="en-US";
+  r.onresult=e=>{
+    document.getElementById("input").value=e.results[0][0].transcript;
+  };
+  r.start();
+}
+
+/* VOICE OUTPUT */
+function speak(t){
+  let s=new SpeechSynthesisUtterance(t);
+  speechSynthesis.speak(s);
+}
+
+/* MOBILE SWIPE */
+let startX=0;
+
+document.getElementById("handle").addEventListener("touchstart",e=>{
+  startX=e.touches[0].clientX;
+});
+
+document.addEventListener("touchmove",e=>{
+  let dx=e.touches[0].clientX-startX;
+
+  if(dx>80){
+    document.getElementById("sidebar").style.transform="translateX(0)";
+  }
+  if(dx<-80){
+    document.getElementById("sidebar").style.transform="translateX(-100%)";
+  }
+});
+
+/* INIT */
+newChat();
+render();
 </script>
 
 </body>
